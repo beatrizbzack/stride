@@ -1,6 +1,8 @@
-# stride
+# Stride
 Linguagem de Programação de Alto Nível que simula um Smart Watch de corrida com funções básicas
 
+APS - LogComp
+Por: Beatriz Borges Zackiewicz
 ---
 
 # Stride – Linguagem de Programação
