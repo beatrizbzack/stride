@@ -42,7 +42,9 @@ WHILE_STMT     = "while", EXPRESSION, [ "do" ], { COMMAND }, "end" ;
 ACTION         = "corra"
                | "pare"
                | "espere", EXPRESSION
-               | "mostre", EXPRESSION ;
+               | "mostre", EXPRESSION 
+               | "mostre", STRING_LITERAL ;
+
 
 EXPRESSION     = TERM, { OPERATOR, TERM } ;
 
@@ -61,3 +63,46 @@ DIGIT          = "0" | "1" | ... | "9" ;
 CHARACTER      = ? qualquer símbolo exceto aspas ? ;
 
 ---
+
+
+## Entrega 22/09 - Lexer e Parser (Flex e Bison)
+
+### Arquivos principais
+- `stride.l` — especificação Flex (lexer)
+- `stride.y` — especificação Bison (parser)
+- `build.ps1` — script PowerShell para gerar/compilar (usa `win_bison`, `win_flex`, `gcc`)
+
+## Requisitos locais
+- Windows com `win_flex` e `win_bison` (WinFlexBison) instalados e acessíveis no PATH.
+- GCC (MSYS2/GCC) disponível como `gcc`.
+- PowerShell para rodar `build.ps1`.
+
+## Como compilar (PowerShell)
+Abra PowerShell no diretório do projeto e execute:
+
+- gera o parser (bison) e lexer (flex) e compila
+.\build.ps1
+
+Saída esperada:
+
+1) bison -> stride.tab.c
+2) flex -> lex.yy.c
+3) gcc -> stride_parser.exe
+Build concluído: .\stride_parser.exe
+
+### Como testar (interativo)
+
+Rode o parser sem argumento e digite comandos diretamente; finalize com Ctrl+Z (Windows) + Enter:
+
+.\stride_parser.exe
+corra;
+mostre "teste";
+# Ctrl+Z + Enter
+
+Resultado esperado ao testar o Parser:
+
+    PS C:\Users\bebec\OneDrive\Área de Trabalho\INSPER\7o Semestre (8o)\LogComp\stride> .\stride_parser.exe 
+    mostre "teste";  
+    action: mostre string => teste
+    corra;           
+    action: corra
