@@ -1,3 +1,4 @@
+
 %{
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,9 +6,9 @@
 #include <stdarg.h>
 
 extern int yylex(void);
+extern int yydebug;
 extern FILE *yyin;
 extern int yylineno;
-int yydebug = 0;
 void yyerror(const char *s);
 
 /* codegen globals */
@@ -82,7 +83,6 @@ int is_sensor(const char *id) {
 
 %token EQ NEQ LE GE
 
-%debug
 %left '+' '-'
 %left '*' '/'
 
@@ -96,21 +96,34 @@ int is_sensor(const char *id) {
 
 %%
 
-/* ---------- program / statements ---------- */
 program:
     /* empty */
-  | program statement
-  ;
+    | program item
+    ;
 
-/* a statement is one top-level command */
-statement:
+item:
+    declaration
+    | command
+    ;
+
+declaration:
+    IDENTIFIER ASSIGN expression
+    {
+        int slot = sym_get_or_create($1);
+        emit("; DECL %s := (top of stack)", $1);
+        emit("POP R0");
+        emit("STORE R0, @%d", slot);
+        free($1);
+    }
+    ;
+
+command:
     assignment
-  | if_stmt
-  | while_stmt
-  | action
-  ;
+    | if_stmt
+    | while_stmt
+    | action
+    ;
 
-/* ---------- assignment ---------- */
 assignment:
     IDENTIFIER ASSIGN expression
     {
@@ -120,81 +133,83 @@ assignment:
         emit("STORE R0, @%d", slot);
         free($1);
     }
-  ;
+    ;
 
-/* ---------- if ---------- */
 if_stmt:
-    IF expression THEN stmt_list END
+    IF expression
+        {
+          int l_else = new_label();
+          int l_end  = new_label();
+          push_labels(l_else, l_end);
+          emit("; IF condition -> pop and test");
+          emit("POP R0");
+          emit("MOV R1, 0");
+          emit("CMP R0, R1");
+          emit("JZ L%d", l_else);
+        }
+    THEN stmt_list maybe_else
+    END
     {
-      /* no else */
-      emit("; IF condition -> pop and test");
-      emit("POP R0");
-      emit("MOV R1, 0");
-      emit("CMP R0, R1");
-      /* if true -> fall through, if zero -> skip following block.
-         We need labels: create one end label now */
-      {
-        int l_else = new_label();
-        emit("JZ L%d", l_else);
-        /* the statements for the THEN were already emitted by stmt_list */
+      if (label_stack_top > 0) {
+        int l_else = top_label_else();
+        emit("L%d:", l_else);
+        pop_labels();
+      }
+    }
+    ;
+
+maybe_else:
+    /* empty */ { }
+  | ELSE stmt_list
+    {
+      if (label_stack_top > 0) {
+        int l_else = top_label_else();
+        int l_end  = top_label_end();
+        emit("JMP L%d", l_end);
         emit("L%d:", l_else);
       }
     }
-  | IF expression THEN stmt_list ELSE stmt_list END
-    {
-      /* with else */
-      int l_else = new_label();
-      int l_end = new_label();
-      emit("; IF condition -> pop and test");
-      emit("POP R0");
-      emit("MOV R1, 0");
-      emit("CMP R0, R1");
-      emit("JZ L%d", l_else);
-      /* then-block code already emitted by first stmt_list */
-      emit("JMP L%d", l_end);
-      emit("L%d:", l_else);
-      /* else-block emitted by second stmt_list */
-      emit("L%d:", l_end);
-    }
   ;
 
-/* ---------- while ---------- */
 while_stmt:
     WHILE
-    {
-      /* create labels and emit start */
-      int l_start = new_label();
-      int l_end = new_label();
-      push_labels(l_start, l_end);
-      emit("L%d:", l_start);
-    }
+      {
+        int l_start = new_label();
+        int l_end = new_label();
+        push_labels(l_start, l_end);
+        emit("L%d:", l_start);
+      }
     expression
-    {
-      /* after expression, test and jump to end if zero */
-      int l_end = top_label_end();
-      emit("POP R0");
-      emit("MOV R1, 0");
-      emit("CMP R0, R1");
-      emit("JZ L%d", l_end);
-    }
+      {
+        int l_end = top_label_end();
+        emit("POP R0");
+        emit("MOV R1, 0");
+        emit("CMP R0, R1");
+        emit("JZ L%d", l_end);
+      }
     DO stmt_list END
-    {
-      /* at end of body, jump back to start and emit end label */
-      int l_start = top_label_else();
-      int l_end   = top_label_end();
-      emit("JMP L%d", l_start);
-      emit("L%d:", l_end);
-      pop_labels();
-    }
+      {
+        if (label_stack_top > 0) {
+          int l_start = top_label_else();
+          int l_end   = top_label_end();
+          emit("JMP L%d", l_start);
+          emit("L%d:", l_end);
+          pop_labels();
+        }
+      }
+    ;
+
+
+opt_do:
+    /* empty */ { }
+  | DO { }
   ;
 
-/* ---------- stmt_list (zero or more statements) ---------- */
 stmt_list:
     /* empty */ { }
-  | stmt_list statement { }
+  | stmt_list command { }
   ;
 
-/* ---------- actions ---------- */
 action:
     CORRA  { emit("; ACTION corra"); emit("PRINT \"ACTION corra\""); }
   | PARE   { emit("; ACTION pare"); emit("PRINT \"ACTION pare\""); }
@@ -212,7 +227,6 @@ action:
       }
   ;
 
-/* ---------- expressions (binary ops, precedence) ---------- */
 expression:
     expr_add
     ;
@@ -220,6 +234,7 @@ expression:
 expr_add:
     expr_add '+' expr_mul
     {
+      /* left + right : both already pushed -> pop right (R1), pop left (R0) */
       emit("; BINOP +");
       emit("POP R1");
       emit("POP R0");
@@ -259,7 +274,38 @@ expr_mul:
     { /* pass-through */ }
   ;
 
-/* ---------- terms ---------- */
+term:
+    NUMBER
+    {
+      emit("; TERM number %d", $1);
+      emit("MOV R0, %d", $1);
+      emit("PUSH R0");
+    }
+  | IDENTIFIER
+    {
+      if (is_sensor($1)) {
+        if (strcmp($1,"tempo")==0) emit("READ_SENSOR R0, TEMPO");
+        else if (strcmp($1,"distancia")==0) emit("READ_SENSOR R0, DISTANCIA");
+        else if (strcmp($1,"batimentos")==0) emit("READ_SENSOR R0, BATAMENTOS");
+        emit("PUSH R0");
+        free($1);
+      } else {
+        int slot = sym_get_or_create($1);
+        emit("; TERM identifier %s -> slot @%d", $1, slot);
+        emit("LOAD R0, @%d", slot);
+        emit("PUSH R0");
+        free($1);
+      }
+    }
+  | STRING
+    {
+      emit("; TERM string \"%s\"", $1);
+      emit("MOV R0, \"%s\"", $1);
+      emit("PUSH R0");
+      free($1);
+    }
+  ;
+
 term:
     NUMBER
     {
@@ -294,12 +340,10 @@ term:
 
 %%
 
-/* error reporting */
 void yyerror(const char *s) {
     fprintf(stderr, "Erro (linha %d): %s\n", yylineno, s);
 }
 
-/* main */
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Uso: %s fonte.stride [saida.asm]\n", argv[0]);
@@ -317,10 +361,6 @@ int main(int argc, char **argv) {
     emit("; sensors available: TEMPO DISTANCIA BATAMENTOS");
     emit("; memory slots start at @0");
     emit("; --- begin program ---");
-
-    /* ativar apenas se precisar do trace em runtime:
-       yydebug = 1;
-    */
 
     yyparse();
 

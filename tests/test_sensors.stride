@@ -1,0 +1,10 @@
+mostre "tempo atual:"
+mostre tempo
+if distancia > 0 then
+  mostre "distancia positiva"
+else
+  mostre "distancia zero"
+end
+corra
+espere 1
+pare

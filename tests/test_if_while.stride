@@ -1,0 +1,7 @@
+counter := 0
+while counter < 3 do
+  mostre "loop:"
+  mostre counter
+  counter := counter + 1
+end
+mostre "done"

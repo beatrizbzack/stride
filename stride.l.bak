@@ -1,3 +1,4 @@
+
 %{
 #include "stride.tab.h"
 #include <stdlib.h>
@@ -67,7 +68,6 @@ void yyerror(const char *s);
                            }
 
 . {
-    /* unknown character: report hex code and skip it (don't return a token) */
     unsigned char c = (unsigned char) yytext[0];
     char buf[64];
     snprintf(buf, sizeof(buf), "Token inválido: 0x%02X", c);
@@ -76,3 +76,4 @@ void yyerror(const char *s);
 }
 
 %%
+

@@ -72,12 +72,74 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+
 extern int yylex(void);
 extern FILE *yyin;
+extern int yylineno;
+int yydebug = 0;
 void yyerror(const char *s);
-extern int line_no;
 
-#line 81 "stride.tab.c"
+/* codegen globals */
+FILE *out = NULL;
+int label_count = 0;
+int new_label() { return ++label_count; }
+
+void emit(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    vfprintf(out, fmt, ap);
+    fprintf(out, "\n");
+    va_end(ap);
+}
+
+/* symbol table */
+typedef struct Sym {
+  char *name;
+  int slot;
+  struct Sym *next;
+} Sym;
+Sym *symtable = NULL;
+int next_slot = 0;
+Sym *sym_find(const char *n) {
+  for (Sym *s = symtable; s; s = s->next) if (strcmp(s->name, n)==0) return s;
+  return NULL;
+}
+int sym_get_or_create(const char *n) {
+  Sym *s = sym_find(n);
+  if (s) return s->slot;
+  s = malloc(sizeof(Sym));
+  s->name = strdup(n);
+  s->slot = next_slot++;
+  s->next = symtable;
+  symtable = s;
+  return s->slot;
+}
+
+/* label stack for nested constructs */
+#define LABEL_STACK_MAX 1024
+int label_stack_else[LABEL_STACK_MAX];
+int label_stack_end[LABEL_STACK_MAX];
+int label_stack_top = 0;
+void push_labels(int l_else, int l_end) {
+  if (label_stack_top < LABEL_STACK_MAX) {
+    label_stack_else[label_stack_top] = l_else;
+    label_stack_end[label_stack_top] = l_end;
+    label_stack_top++;
+  }
+}
+void pop_labels() {
+  if (label_stack_top > 0) label_stack_top--;
+}
+int top_label_else() { return label_stack_else[label_stack_top-1]; }
+int top_label_end() { return label_stack_end[label_stack_top-1]; }
+
+int is_sensor(const char *id) {
+    if (!id) return 0;
+    return (strcmp(id,"tempo")==0 || strcmp(id,"distancia")==0 || strcmp(id,"batimentos")==0);
+}
+
+
+#line 143 "stride.tab.c"
 
 # ifndef YY_CAST
 #  ifdef __cplusplus
@@ -108,50 +170,42 @@ enum yysymbol_kind_t
   YYSYMBOL_YYEOF = 0,                      /* "end of file"  */
   YYSYMBOL_YYerror = 1,                    /* error  */
   YYSYMBOL_YYUNDEF = 2,                    /* "invalid token"  */
-  YYSYMBOL_NUMBER = 3,                     /* NUMBER  */
-  YYSYMBOL_IDENTIFIER = 4,                 /* IDENTIFIER  */
-  YYSYMBOL_STRING_LITERAL = 5,             /* STRING_LITERAL  */
-  YYSYMBOL_CORRA = 6,                      /* CORRA  */
-  YYSYMBOL_PARE = 7,                       /* PARE  */
-  YYSYMBOL_ESPERE = 8,                     /* ESPERE  */
-  YYSYMBOL_MOSTRE = 9,                     /* MOSTRE  */
-  YYSYMBOL_IF = 10,                        /* IF  */
-  YYSYMBOL_THEN = 11,                      /* THEN  */
-  YYSYMBOL_ELSE = 12,                      /* ELSE  */
-  YYSYMBOL_END = 13,                       /* END  */
-  YYSYMBOL_WHILE = 14,                     /* WHILE  */
-  YYSYMBOL_DO = 15,                        /* DO  */
-  YYSYMBOL_TEMPO = 16,                     /* TEMPO  */
-  YYSYMBOL_DISTANCIA = 17,                 /* DISTANCIA  */
-  YYSYMBOL_BATIMENTOS = 18,                /* BATIMENTOS  */
-  YYSYMBOL_EQ = 19,                        /* EQ  */
-  YYSYMBOL_NEQ = 20,                       /* NEQ  */
-  YYSYMBOL_LE = 21,                        /* LE  */
-  YYSYMBOL_GE = 22,                        /* GE  */
-  YYSYMBOL_ASSIGN = 23,                    /* ASSIGN  */
-  YYSYMBOL_24_ = 24,                       /* '+'  */
-  YYSYMBOL_25_ = 25,                       /* '-'  */
-  YYSYMBOL_26_ = 26,                       /* '*'  */
-  YYSYMBOL_27_ = 27,                       /* '/'  */
-  YYSYMBOL_28_ = 28,                       /* '<'  */
-  YYSYMBOL_29_ = 29,                       /* '>'  */
-  YYSYMBOL_UMINUS = 30,                    /* UMINUS  */
-  YYSYMBOL_31_ = 31,                       /* ';'  */
-  YYSYMBOL_32_ = 32,                       /* '('  */
-  YYSYMBOL_33_ = 33,                       /* ')'  */
-  YYSYMBOL_YYACCEPT = 34,                  /* $accept  */
-  YYSYMBOL_program = 35,                   /* program  */
-  YYSYMBOL_decl_or_command_list = 36,      /* decl_or_command_list  */
-  YYSYMBOL_decl_or_command = 37,           /* decl_or_command  */
-  YYSYMBOL_assignment = 38,                /* assignment  */
-  YYSYMBOL_if_stmt = 39,                   /* if_stmt  */
-  YYSYMBOL_opt_else = 40,                  /* opt_else  */
-  YYSYMBOL_while_stmt = 41,                /* while_stmt  */
-  YYSYMBOL_opt_do = 42,                    /* opt_do  */
-  YYSYMBOL_action_stmt = 43,               /* action_stmt  */
-  YYSYMBOL_expression = 44,                /* expression  */
-  YYSYMBOL_term = 45,                      /* term  */
-  YYSYMBOL_factor = 46                     /* factor  */
+  YYSYMBOL_ASSIGN = 3,                     /* ASSIGN  */
+  YYSYMBOL_IF = 4,                         /* IF  */
+  YYSYMBOL_THEN = 5,                       /* THEN  */
+  YYSYMBOL_ELSE = 6,                       /* ELSE  */
+  YYSYMBOL_END = 7,                        /* END  */
+  YYSYMBOL_WHILE = 8,                      /* WHILE  */
+  YYSYMBOL_DO = 9,                         /* DO  */
+  YYSYMBOL_CORRA = 10,                     /* CORRA  */
+  YYSYMBOL_PARE = 11,                      /* PARE  */
+  YYSYMBOL_ESPERE = 12,                    /* ESPERE  */
+  YYSYMBOL_MOSTRE = 13,                    /* MOSTRE  */
+  YYSYMBOL_IDENTIFIER = 14,                /* IDENTIFIER  */
+  YYSYMBOL_NUMBER = 15,                    /* NUMBER  */
+  YYSYMBOL_STRING = 16,                    /* STRING  */
+  YYSYMBOL_EQ = 17,                        /* EQ  */
+  YYSYMBOL_NEQ = 18,                       /* NEQ  */
+  YYSYMBOL_LE = 19,                        /* LE  */
+  YYSYMBOL_GE = 20,                        /* GE  */
+  YYSYMBOL_21_ = 21,                       /* '+'  */
+  YYSYMBOL_22_ = 22,                       /* '-'  */
+  YYSYMBOL_23_ = 23,                       /* '*'  */
+  YYSYMBOL_24_ = 24,                       /* '/'  */
+  YYSYMBOL_YYACCEPT = 25,                  /* $accept  */
+  YYSYMBOL_program = 26,                   /* program  */
+  YYSYMBOL_statement = 27,                 /* statement  */
+  YYSYMBOL_assignment = 28,                /* assignment  */
+  YYSYMBOL_if_stmt = 29,                   /* if_stmt  */
+  YYSYMBOL_while_stmt = 30,                /* while_stmt  */
+  YYSYMBOL_31_1 = 31,                      /* $@1  */
+  YYSYMBOL_32_2 = 32,                      /* $@2  */
+  YYSYMBOL_stmt_list = 33,                 /* stmt_list  */
+  YYSYMBOL_action = 34,                    /* action  */
+  YYSYMBOL_expression = 35,                /* expression  */
+  YYSYMBOL_expr_add = 36,                  /* expr_add  */
+  YYSYMBOL_expr_mul = 37,                  /* expr_mul  */
+  YYSYMBOL_term = 38                       /* term  */
 };
 typedef enum yysymbol_kind_t yysymbol_kind_t;
 
@@ -477,21 +531,21 @@ union yyalloc
 #endif /* !YYCOPY_NEEDED */
 
 /* YYFINAL -- State number of the termination state.  */
-#define YYFINAL  32
+#define YYFINAL  2
 /* YYLAST -- Last index in YYTABLE.  */
-#define YYLAST   159
+#define YYLAST   58
 
 /* YYNTOKENS -- Number of terminals.  */
-#define YYNTOKENS  34
+#define YYNTOKENS  25
 /* YYNNTS -- Number of nonterminals.  */
-#define YYNNTS  13
+#define YYNNTS  14
 /* YYNRULES -- Number of rules.  */
-#define YYNRULES  39
+#define YYNRULES  29
 /* YYNSTATES -- Number of states.  */
-#define YYNSTATES  72
+#define YYNSTATES  47
 
 /* YYMAXUTOK -- Last valid token kind.  */
-#define YYMAXUTOK   279
+#define YYMAXUTOK   275
 
 
 /* YYTRANSLATE(TOKEN-NUM) -- Symbol number corresponding to TOKEN-NUM
@@ -509,9 +563,9 @@ static const yytype_int8 yytranslate[] =
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
-      32,    33,    26,    24,     2,    25,     2,    27,     2,     2,
-       2,     2,     2,     2,     2,     2,     2,     2,     2,    31,
-      28,     2,    29,     2,     2,     2,     2,     2,     2,     2,
+       2,     2,    23,    21,     2,    22,     2,    24,     2,     2,
+       2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
+       2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
@@ -532,17 +586,16 @@ static const yytype_int8 yytranslate[] =
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     1,     2,     3,     4,
        5,     6,     7,     8,     9,    10,    11,    12,    13,    14,
-      15,    16,    17,    18,    19,    20,    21,    22,    23,    30
+      15,    16,    17,    18,    19,    20
 };
 
 #if YYDEBUG
 /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
-static const yytype_int8 yyrline[] =
+static const yytype_int16 yyrline[] =
 {
-       0,    27,    27,    30,    31,    34,    35,    36,    37,    40,
-      43,    45,    46,    49,    51,    52,    55,    56,    57,    58,
-      59,    62,    63,    64,    65,    66,    67,    68,    69,    70,
-      73,    74,    75,    78,    79,    80,    81,    82,    83,    84
+       0,   100,   100,   102,   107,   108,   109,   110,   115,   127,
+     143,   164,   172,   163,   193,   194,   199,   200,   201,   207,
+     217,   221,   229,   237,   242,   250,   258,   264,   270,   286
 };
 #endif
 
@@ -558,14 +611,12 @@ static const char *yysymbol_name (yysymbol_kind_t yysymbol) YY_ATTRIBUTE_UNUSED;
    First, the terminals, then, starting at YYNTOKENS, nonterminals.  */
 static const char *const yytname[] =
 {
-  "\"end of file\"", "error", "\"invalid token\"", "NUMBER", "IDENTIFIER",
-  "STRING_LITERAL", "CORRA", "PARE", "ESPERE", "MOSTRE", "IF", "THEN",
-  "ELSE", "END", "WHILE", "DO", "TEMPO", "DISTANCIA", "BATIMENTOS", "EQ",
-  "NEQ", "LE", "GE", "ASSIGN", "'+'", "'-'", "'*'", "'/'", "'<'", "'>'",
-  "UMINUS", "';'", "'('", "')'", "$accept", "program",
-  "decl_or_command_list", "decl_or_command", "assignment", "if_stmt",
-  "opt_else", "while_stmt", "opt_do", "action_stmt", "expression", "term",
-  "factor", YY_NULLPTR
+  "\"end of file\"", "error", "\"invalid token\"", "ASSIGN", "IF", "THEN",
+  "ELSE", "END", "WHILE", "DO", "CORRA", "PARE", "ESPERE", "MOSTRE",
+  "IDENTIFIER", "NUMBER", "STRING", "EQ", "NEQ", "LE", "GE", "'+'", "'-'",
+  "'*'", "'/'", "$accept", "program", "statement", "assignment", "if_stmt",
+  "while_stmt", "$@1", "$@2", "stmt_list", "action", "expression",
+  "expr_add", "expr_mul", "term", YY_NULLPTR
 };
 
 static const char *
@@ -575,7 +626,7 @@ yysymbol_name (yysymbol_kind_t yysymbol)
 }
 #endif
 
-#define YYPACT_NINF (-39)
+#define YYPACT_NINF (-38)
 
 #define yypact_value_is_default(Yyn) \
   ((Yyn) == YYPACT_NINF)
@@ -583,20 +634,17 @@ yysymbol_name (yysymbol_kind_t yysymbol)
 #define YYTABLE_NINF (-1)
 
 #define yytable_value_is_error(Yyn) \
-  ((Yyn) == YYTABLE_NINF)
+  0
 
 /* YYPACT[STATE-NUM] -- Index in YYTABLE of the portion describing
    STATE-NUM.  */
-static const yytype_int16 yypact[] =
+static const yytype_int8 yypact[] =
 {
-     145,   -16,   -18,    -7,    28,     5,    28,    28,    15,   145,
-     -39,   -39,   -39,   -39,   -39,    28,   -39,   -39,   -39,   -39,
-     -39,   -39,   -39,    28,    28,    73,   -21,   -39,     7,    86,
-      30,    47,   -39,   -39,    99,   -39,    58,    28,    28,    28,
-      28,    28,    28,    28,    28,   -39,    28,    28,   -39,   -39,
-     145,   -39,   145,   -39,   -39,    -3,    -3,    -3,    -3,   -21,
-     -21,    -3,    -3,   -39,   -39,   125,   134,   145,    34,   -39,
-     145,   -39
+     -38,     9,   -38,    -8,   -38,   -38,   -38,    -8,    -8,    11,
+     -38,   -38,   -38,   -38,   -38,   -38,   -38,   -38,    24,   -18,
+     -13,   -38,    -8,   -38,   -38,    -8,   -38,    -8,    -8,    -8,
+      -8,   -38,   -38,    20,   -13,   -13,   -38,   -38,     3,   -38,
+     -38,   -38,   -38,    31,    42,   -38,   -38
 };
 
 /* YYDEFACT[STATE-NUM] -- Default reduction number in state STATE-NUM.
@@ -604,28 +652,25 @@ static const yytype_int16 yypact[] =
    means the default is an error.  */
 static const yytype_int8 yydefact[] =
 {
-       0,     0,     0,     0,     0,     0,     0,     0,     0,     2,
-       3,     5,     6,     7,     8,     0,    16,    17,    33,    34,
-      35,    36,    37,     0,     0,     0,    23,    32,     0,     0,
-       0,    14,     1,     4,     0,    39,     0,     0,     0,     0,
-       0,     0,     0,     0,     0,    18,     0,     0,    20,    19,
-       0,    15,     0,     9,    38,    26,    27,    28,    29,    21,
-      22,    24,    25,    30,    31,    11,     0,     0,     0,    13,
-      12,    10
+       2,     0,     1,     0,    11,    16,    17,     0,     0,     0,
+       3,     4,     5,     6,     7,    28,    27,    29,     0,    20,
+      23,    26,     0,    18,    19,     0,    14,     0,     0,     0,
+       0,    12,     8,     0,    21,    22,    24,    25,     0,    14,
+       9,    15,    14,     0,     0,    10,    13
 };
 
 /* YYPGOTO[NTERM-NUM].  */
 static const yytype_int8 yypgoto[] =
 {
-     -39,   -39,   -38,    -9,   -39,   -39,   -39,   -39,   -39,   -39,
-      -4,     1,   -19
+     -38,   -38,    15,   -38,   -38,   -38,   -38,   -38,   -37,   -38,
+      -7,   -38,    30,     7
 };
 
 /* YYDEFGOTO[NTERM-NUM].  */
 static const yytype_int8 yydefgoto[] =
 {
-       0,     8,     9,    10,    11,    12,    68,    13,    52,    14,
-      25,    26,    27
+       0,     1,    41,    11,    12,    13,    22,    38,    33,    14,
+      18,    19,    20,    21
 };
 
 /* YYTABLE[YYPACT[STATE-NUM]] -- What to do in state STATE-NUM.  If
@@ -633,74 +678,49 @@ static const yytype_int8 yydefgoto[] =
    number is the opposite.  If YYTABLE_NINF, syntax error.  */
 static const yytype_int8 yytable[] =
 {
-      33,    29,    30,    31,    35,    46,    47,    15,    18,    19,
-      28,    34,    65,    16,    66,    32,    -1,    -1,    -1,    -1,
-      36,    20,    21,    22,    17,    -1,    -1,    63,    64,    70,
-      23,    18,    19,    55,    56,    57,    58,    24,    48,    61,
-      62,    50,    59,    60,    20,    21,    22,    71,     0,    37,
-      38,    39,    40,    23,    41,    42,    33,    33,    43,    44,
-      24,    33,    51,     0,     0,     0,    37,    38,    39,    40,
-       0,    41,    42,     0,     0,    43,    44,    37,    38,    39,
-      40,     0,    41,    42,     0,     0,    43,    44,     0,     0,
-       0,    54,    37,    38,    39,    40,     0,    41,    42,     0,
-       0,    43,    44,     0,    45,    37,    38,    39,    40,     0,
-      41,    42,     0,     0,    43,    44,     0,    49,    37,    38,
-      39,    40,     0,    41,    42,     0,     0,    43,    44,     1,
-      53,     2,     3,     4,     5,     6,     0,    67,     1,     7,
-       2,     3,     4,     5,     6,     0,     0,    69,     7,     1,
-       0,     2,     3,     4,     5,     6,     0,     0,     0,     7
+      23,    24,    43,    27,    28,    44,    15,    16,    17,     2,
+      29,    30,    42,     3,    25,    31,    10,     4,    32,     5,
+       6,     7,     8,     9,     3,     0,    39,    40,     4,    26,
+       5,     6,     7,     8,     9,     3,    36,    37,    45,     4,
+       0,     5,     6,     7,     8,     9,     3,     0,     0,    46,
+       4,     0,     5,     6,     7,     8,     9,    34,    35
 };
 
 static const yytype_int8 yycheck[] =
 {
-       9,     5,     6,     7,    23,    26,    27,    23,     3,     4,
-       5,    15,    50,    31,    52,     0,    19,    20,    21,    22,
-      24,    16,    17,    18,    31,    28,    29,    46,    47,    67,
-      25,     3,     4,    37,    38,    39,    40,    32,    31,    43,
-      44,    11,    41,    42,    16,    17,    18,    13,    -1,    19,
-      20,    21,    22,    25,    24,    25,    65,    66,    28,    29,
-      32,    70,    15,    -1,    -1,    -1,    19,    20,    21,    22,
-      -1,    24,    25,    -1,    -1,    28,    29,    19,    20,    21,
-      22,    -1,    24,    25,    -1,    -1,    28,    29,    -1,    -1,
-      -1,    33,    19,    20,    21,    22,    -1,    24,    25,    -1,
-      -1,    28,    29,    -1,    31,    19,    20,    21,    22,    -1,
-      24,    25,    -1,    -1,    28,    29,    -1,    31,    19,    20,
-      21,    22,    -1,    24,    25,    -1,    -1,    28,    29,     4,
-      31,     6,     7,     8,     9,    10,    -1,    12,     4,    14,
-       6,     7,     8,     9,    10,    -1,    -1,    13,    14,     4,
-      -1,     6,     7,     8,     9,    10,    -1,    -1,    -1,    14
+       7,     8,    39,    21,    22,    42,    14,    15,    16,     0,
+      23,    24,     9,     4,     3,    22,     1,     8,    25,    10,
+      11,    12,    13,    14,     4,    -1,     6,     7,     8,     5,
+      10,    11,    12,    13,    14,     4,    29,    30,     7,     8,
+      -1,    10,    11,    12,    13,    14,     4,    -1,    -1,     7,
+       8,    -1,    10,    11,    12,    13,    14,    27,    28
 };
 
 /* YYSTOS[STATE-NUM] -- The symbol kind of the accessing symbol of
    state STATE-NUM.  */
 static const yytype_int8 yystos[] =
 {
-       0,     4,     6,     7,     8,     9,    10,    14,    35,    36,
-      37,    38,    39,    41,    43,    23,    31,    31,     3,     4,
-      16,    17,    18,    25,    32,    44,    45,    46,     5,    44,
-      44,    44,     0,    37,    44,    46,    44,    19,    20,    21,
-      22,    24,    25,    28,    29,    31,    26,    27,    31,    31,
-      11,    15,    42,    31,    33,    44,    44,    44,    44,    45,
-      45,    44,    44,    46,    46,    36,    36,    12,    40,    13,
-      36,    13
+       0,    26,     0,     4,     8,    10,    11,    12,    13,    14,
+      27,    28,    29,    30,    34,    14,    15,    16,    35,    36,
+      37,    38,    31,    35,    35,     3,     5,    21,    22,    23,
+      24,    35,    35,    33,    37,    37,    38,    38,    32,     6,
+       7,    27,     9,    33,    33,     7,     7
 };
 
 /* YYR1[RULE-NUM] -- Symbol kind of the left-hand side of rule RULE-NUM.  */
 static const yytype_int8 yyr1[] =
 {
-       0,    34,    35,    36,    36,    37,    37,    37,    37,    38,
-      39,    40,    40,    41,    42,    42,    43,    43,    43,    43,
-      43,    44,    44,    44,    44,    44,    44,    44,    44,    44,
-      45,    45,    45,    46,    46,    46,    46,    46,    46,    46
+       0,    25,    26,    26,    27,    27,    27,    27,    28,    29,
+      29,    31,    32,    30,    33,    33,    34,    34,    34,    34,
+      35,    36,    36,    36,    37,    37,    37,    38,    38,    38
 };
 
 /* YYR2[RULE-NUM] -- Number of symbols on the right-hand side of rule RULE-NUM.  */
 static const yytype_int8 yyr2[] =
 {
-       0,     2,     1,     1,     2,     1,     1,     1,     1,     4,
-       6,     0,     2,     5,     0,     1,     2,     2,     3,     3,
-       3,     3,     3,     1,     3,     3,     3,     3,     3,     3,
-       3,     3,     1,     1,     1,     1,     1,     1,     3,     2
+       0,     2,     0,     2,     1,     1,     1,     1,     3,     5,
+       7,     0,     0,     7,     0,     2,     1,     1,     2,     2,
+       1,     3,     3,     1,     3,     3,     1,     1,     1,     1
 };
 
 
@@ -1163,158 +1183,243 @@ yyreduce:
   YY_REDUCE_PRINT (yyn);
   switch (yyn)
     {
-  case 9: /* assignment: IDENTIFIER ASSIGN expression ';'  */
-#line 40 "stride.y"
-                                       {printf("assignment: %s := %d\n",(yyvsp[-3].str),(yyvsp[-1].number));free((yyvsp[-3].str));}
-#line 1170 "stride.tab.c"
+  case 8: /* assignment: IDENTIFIER ASSIGN expression  */
+#line 116 "stride.y"
+    {
+        int slot = sym_get_or_create((yyvsp[-2].str));
+        emit("; ASSIGN %s := (top of stack)", (yyvsp[-2].str));
+        emit("POP R0");
+        emit("STORE R0, @%d", slot);
+        free((yyvsp[-2].str));
+    }
+#line 1196 "stride.tab.c"
     break;
 
-  case 16: /* action_stmt: CORRA ';'  */
-#line 55 "stride.y"
-                                        {printf("action: corra\n");}
-#line 1176 "stride.tab.c"
+  case 9: /* if_stmt: IF expression THEN stmt_list END  */
+#line 128 "stride.y"
+    {
+      /* no else */
+      emit("; IF condition -> pop and test");
+      emit("POP R0");
+      emit("MOV R1, 0");
+      emit("CMP R0, R1");
+      /* if true -> fall through, if zero -> skip following block.
+         We need labels: create one end label now */
+      {
+        int l_else = new_label();
+        emit("JZ L%d", l_else);
+        /* the statements for the THEN were already emitted by stmt_list */
+        emit("L%d:", l_else);
+      }
+    }
+#line 1216 "stride.tab.c"
     break;
 
-  case 17: /* action_stmt: PARE ';'  */
-#line 56 "stride.y"
-                                        {printf("action: pare\n");}
-#line 1182 "stride.tab.c"
-    break;
-
-  case 18: /* action_stmt: ESPERE expression ';'  */
-#line 57 "stride.y"
-                                        {printf("action: espere %d\n",(yyvsp[-1].number));}
-#line 1188 "stride.tab.c"
-    break;
-
-  case 19: /* action_stmt: MOSTRE expression ';'  */
-#line 58 "stride.y"
-                                        {printf("action: mostre expr => %d\n",(yyvsp[-1].number));}
-#line 1194 "stride.tab.c"
-    break;
-
-  case 20: /* action_stmt: MOSTRE STRING_LITERAL ';'  */
-#line 59 "stride.y"
-                                        {printf("action: mostre string => %s\n",(yyvsp[-1].str));free((yyvsp[-1].str));}
-#line 1200 "stride.tab.c"
-    break;
-
-  case 21: /* expression: expression '+' term  */
-#line 62 "stride.y"
-                                       {(yyval.number)=(yyvsp[-2].number)+(yyvsp[0].number);}
-#line 1206 "stride.tab.c"
-    break;
-
-  case 22: /* expression: expression '-' term  */
-#line 63 "stride.y"
-                                       {(yyval.number)=(yyvsp[-2].number)-(yyvsp[0].number);}
-#line 1212 "stride.tab.c"
-    break;
-
-  case 23: /* expression: term  */
-#line 64 "stride.y"
-                                       {(yyval.number)=(yyvsp[0].number);}
-#line 1218 "stride.tab.c"
-    break;
-
-  case 24: /* expression: expression '<' expression  */
-#line 65 "stride.y"
-                                       {(yyval.number)=((yyvsp[-2].number)<(yyvsp[0].number));}
-#line 1224 "stride.tab.c"
-    break;
-
-  case 25: /* expression: expression '>' expression  */
-#line 66 "stride.y"
-                                       {(yyval.number)=((yyvsp[-2].number)>(yyvsp[0].number));}
-#line 1230 "stride.tab.c"
-    break;
-
-  case 26: /* expression: expression EQ expression  */
-#line 67 "stride.y"
-                                       {(yyval.number)=((yyvsp[-2].number)==(yyvsp[0].number));}
+  case 10: /* if_stmt: IF expression THEN stmt_list ELSE stmt_list END  */
+#line 144 "stride.y"
+    {
+      /* with else */
+      int l_else = new_label();
+      int l_end = new_label();
+      emit("; IF condition -> pop and test");
+      emit("POP R0");
+      emit("MOV R1, 0");
+      emit("CMP R0, R1");
+      emit("JZ L%d", l_else);
+      /* then-block code already emitted by first stmt_list */
+      emit("JMP L%d", l_end);
+      emit("L%d:", l_else);
+      /* else-block emitted by second stmt_list */
+      emit("L%d:", l_end);
+    }
 #line 1236 "stride.tab.c"
     break;
 
-  case 27: /* expression: expression NEQ expression  */
-#line 68 "stride.y"
-                                       {(yyval.number)=((yyvsp[-2].number)!=(yyvsp[0].number));}
-#line 1242 "stride.tab.c"
-    break;
-
-  case 28: /* expression: expression LE expression  */
-#line 69 "stride.y"
-                                       {(yyval.number)=((yyvsp[-2].number)<=(yyvsp[0].number));}
+  case 11: /* $@1: %empty  */
+#line 164 "stride.y"
+    {
+      /* create labels and emit start */
+      int l_start = new_label();
+      int l_end = new_label();
+      push_labels(l_start, l_end);
+      emit("L%d:", l_start);
+    }
 #line 1248 "stride.tab.c"
     break;
 
-  case 29: /* expression: expression GE expression  */
-#line 70 "stride.y"
-                                       {(yyval.number)=((yyvsp[-2].number)>=(yyvsp[0].number));}
-#line 1254 "stride.tab.c"
+  case 12: /* $@2: %empty  */
+#line 172 "stride.y"
+    {
+      /* after expression, test and jump to end if zero */
+      int l_end = top_label_end();
+      emit("POP R0");
+      emit("MOV R1, 0");
+      emit("CMP R0, R1");
+      emit("JZ L%d", l_end);
+    }
+#line 1261 "stride.tab.c"
     break;
 
-  case 30: /* term: term '*' factor  */
-#line 73 "stride.y"
-                                       {(yyval.number)=(yyvsp[-2].number)*(yyvsp[0].number);}
-#line 1260 "stride.tab.c"
+  case 13: /* while_stmt: WHILE $@1 expression $@2 DO stmt_list END  */
+#line 181 "stride.y"
+    {
+      /* at end of body, jump back to start and emit end label */
+      int l_start = top_label_else();
+      int l_end   = top_label_end();
+      emit("JMP L%d", l_start);
+      emit("L%d:", l_end);
+      pop_labels();
+    }
+#line 1274 "stride.tab.c"
     break;
 
-  case 31: /* term: term '/' factor  */
-#line 74 "stride.y"
-                                       {(yyval.number)=(yyvsp[-2].number)/(yyvsp[0].number);}
-#line 1266 "stride.tab.c"
+  case 14: /* stmt_list: %empty  */
+#line 193 "stride.y"
+                { }
+#line 1280 "stride.tab.c"
     break;
 
-  case 32: /* term: factor  */
-#line 75 "stride.y"
-                                       {(yyval.number)=(yyvsp[0].number);}
-#line 1272 "stride.tab.c"
+  case 15: /* stmt_list: stmt_list statement  */
+#line 194 "stride.y"
+                        { }
+#line 1286 "stride.tab.c"
     break;
 
-  case 33: /* factor: NUMBER  */
-#line 78 "stride.y"
-                                       {(yyval.number)=(yyvsp[0].number);}
-#line 1278 "stride.tab.c"
+  case 16: /* action: CORRA  */
+#line 199 "stride.y"
+           { emit("; ACTION corra"); emit("PRINT \"ACTION corra\""); }
+#line 1292 "stride.tab.c"
     break;
 
-  case 34: /* factor: IDENTIFIER  */
-#line 79 "stride.y"
-                                       {(yyval.number)=0;free((yyvsp[0].str));}
-#line 1284 "stride.tab.c"
+  case 17: /* action: PARE  */
+#line 200 "stride.y"
+           { emit("; ACTION pare"); emit("PRINT \"ACTION pare\""); }
+#line 1298 "stride.tab.c"
     break;
 
-  case 35: /* factor: TEMPO  */
-#line 80 "stride.y"
-                                       {(yyval.number)=0;}
-#line 1290 "stride.tab.c"
-    break;
-
-  case 36: /* factor: DISTANCIA  */
-#line 81 "stride.y"
-                                       {(yyval.number)=0;}
-#line 1296 "stride.tab.c"
-    break;
-
-  case 37: /* factor: BATIMENTOS  */
-#line 82 "stride.y"
-                                       {(yyval.number)=0;}
-#line 1302 "stride.tab.c"
-    break;
-
-  case 38: /* factor: '(' expression ')'  */
-#line 83 "stride.y"
-                                       {(yyval.number)=(yyvsp[-1].number);}
+  case 18: /* action: ESPERE expression  */
+#line 202 "stride.y"
+      {
+        emit("; ACTION espere (pop seconds)");
+        emit("POP R0");
+        emit("WAIT R0");
+      }
 #line 1308 "stride.tab.c"
     break;
 
-  case 39: /* factor: '-' factor  */
-#line 84 "stride.y"
-                                       {(yyval.number)=-(yyvsp[0].number);}
-#line 1314 "stride.tab.c"
+  case 19: /* action: MOSTRE expression  */
+#line 208 "stride.y"
+      {
+        emit("; ACTION mostre (pop and print)");
+        emit("POP R0");
+        emit("PRINT R0");
+      }
+#line 1318 "stride.tab.c"
+    break;
+
+  case 21: /* expr_add: expr_add '+' expr_mul  */
+#line 222 "stride.y"
+    {
+      emit("; BINOP +");
+      emit("POP R1");
+      emit("POP R0");
+      emit("ADD R0, R1");
+      emit("PUSH R0");
+    }
+#line 1330 "stride.tab.c"
+    break;
+
+  case 22: /* expr_add: expr_add '-' expr_mul  */
+#line 230 "stride.y"
+    {
+      emit("; BINOP -");
+      emit("POP R1");
+      emit("POP R0");
+      emit("SUB R0, R1");
+      emit("PUSH R0");
+    }
+#line 1342 "stride.tab.c"
+    break;
+
+  case 23: /* expr_add: expr_mul  */
+#line 238 "stride.y"
+    { /* pass-through */ }
+#line 1348 "stride.tab.c"
+    break;
+
+  case 24: /* expr_mul: expr_mul '*' term  */
+#line 243 "stride.y"
+    {
+      emit("; BINOP *");
+      emit("POP R1");
+      emit("POP R0");
+      emit("MUL R0, R1");
+      emit("PUSH R0");
+    }
+#line 1360 "stride.tab.c"
+    break;
+
+  case 25: /* expr_mul: expr_mul '/' term  */
+#line 251 "stride.y"
+    {
+      emit("; BINOP /");
+      emit("POP R1");
+      emit("POP R0");
+      emit("DIV R0, R1");
+      emit("PUSH R0");
+    }
+#line 1372 "stride.tab.c"
+    break;
+
+  case 26: /* expr_mul: term  */
+#line 259 "stride.y"
+    { /* pass-through */ }
+#line 1378 "stride.tab.c"
+    break;
+
+  case 27: /* term: NUMBER  */
+#line 265 "stride.y"
+    {
+      emit("; TERM number %d", (yyvsp[0].num));
+      emit("MOV R0, %d", (yyvsp[0].num));
+      emit("PUSH R0");
+    }
+#line 1388 "stride.tab.c"
+    break;
+
+  case 28: /* term: IDENTIFIER  */
+#line 271 "stride.y"
+    {
+      if (is_sensor((yyvsp[0].str))) {
+        if (strcmp((yyvsp[0].str),"tempo")==0) emit("READ_SENSOR R0, TEMPO");
+        else if (strcmp((yyvsp[0].str),"distancia")==0) emit("READ_SENSOR R0, DISTANCIA");
+        else if (strcmp((yyvsp[0].str),"batimentos")==0) emit("READ_SENSOR R0, BATAMENTOS");
+        emit("PUSH R0");
+        free((yyvsp[0].str));
+      } else {
+        int slot = sym_get_or_create((yyvsp[0].str));
+        emit("; TERM identifier %s -> slot @%d", (yyvsp[0].str), slot);
+        emit("LOAD R0, @%d", slot);
+        emit("PUSH R0");
+        free((yyvsp[0].str));
+      }
+    }
+#line 1408 "stride.tab.c"
+    break;
+
+  case 29: /* term: STRING  */
+#line 287 "stride.y"
+    {
+      emit("; TERM string \"%s\"", (yyvsp[0].str));
+      emit("MOV R0, \"%s\"", (yyvsp[0].str));
+      emit("PUSH R0");
+      free((yyvsp[0].str));
+    }
+#line 1419 "stride.tab.c"
     break;
 
 
-#line 1318 "stride.tab.c"
+#line 1423 "stride.tab.c"
 
       default: break;
     }
@@ -1507,16 +1612,43 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 86 "stride.y"
+#line 295 "stride.y"
 
-void yyerror(const char *s){fprintf(stderr,"Erro: %s na linha %d\n",s,line_no);}
-int main(int argc,char **argv){
-    if(argc>1){
-        yyin=fopen(argv[1],"r");
-        if(!yyin){perror("fopen");return 1;}
-    }else{
-        yyin=stdin;
+
+/* error reporting */
+void yyerror(const char *s) {
+    fprintf(stderr, "Erro (linha %d): %s\n", yylineno, s);
+}
+
+/* main */
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s fonte.stride [saida.asm]\n", argv[0]);
+        return 1;
     }
+
+    yyin = fopen(argv[1], "r");
+    if (!yyin) { perror("fopen fonte"); return 1; }
+
+    const char *outname = (argc > 2) ? argv[2] : "out.asm";
+    out = fopen(outname, "w");
+    if (!out) { perror("fopen out"); return 1; }
+
+    emit("; Stride compiled assembly");
+    emit("; sensors available: TEMPO DISTANCIA BATAMENTOS");
+    emit("; memory slots start at @0");
+    emit("; --- begin program ---");
+
+    /* ativar apenas se precisar do trace em runtime:
+       yydebug = 1;
+    */
+
     yyparse();
+
+    emit("HALT");
+    fclose(out);
+    fclose(yyin);
+
+    printf("[COMPILADO] %s -> %s\n", argv[1], outname);
     return 0;
 }

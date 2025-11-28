@@ -39,7 +39,7 @@
 # define YY_YY_STRIDE_TAB_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
-# define YYDEBUG 0
+# define YYDEBUG 1
 #endif
 #if YYDEBUG
 extern int yydebug;
@@ -54,28 +54,24 @@ extern int yydebug;
     YYEOF = 0,                     /* "end of file"  */
     YYerror = 256,                 /* error  */
     YYUNDEF = 257,                 /* "invalid token"  */
-    NUMBER = 258,                  /* NUMBER  */
-    IDENTIFIER = 259,              /* IDENTIFIER  */
-    STRING_LITERAL = 260,          /* STRING_LITERAL  */
-    CORRA = 261,                   /* CORRA  */
-    PARE = 262,                    /* PARE  */
-    ESPERE = 263,                  /* ESPERE  */
-    MOSTRE = 264,                  /* MOSTRE  */
-    IF = 265,                      /* IF  */
-    THEN = 266,                    /* THEN  */
-    ELSE = 267,                    /* ELSE  */
-    END = 268,                     /* END  */
-    WHILE = 269,                   /* WHILE  */
-    DO = 270,                      /* DO  */
-    TEMPO = 271,                   /* TEMPO  */
-    DISTANCIA = 272,               /* DISTANCIA  */
-    BATIMENTOS = 273,              /* BATIMENTOS  */
-    EQ = 274,                      /* EQ  */
-    NEQ = 275,                     /* NEQ  */
-    LE = 276,                      /* LE  */
-    GE = 277,                      /* GE  */
-    ASSIGN = 278,                  /* ASSIGN  */
-    UMINUS = 279                   /* UMINUS  */
+    ASSIGN = 258,                  /* ASSIGN  */
+    IF = 259,                      /* IF  */
+    THEN = 260,                    /* THEN  */
+    ELSE = 261,                    /* ELSE  */
+    END = 262,                     /* END  */
+    WHILE = 263,                   /* WHILE  */
+    DO = 264,                      /* DO  */
+    CORRA = 265,                   /* CORRA  */
+    PARE = 266,                    /* PARE  */
+    ESPERE = 267,                  /* ESPERE  */
+    MOSTRE = 268,                  /* MOSTRE  */
+    IDENTIFIER = 269,              /* IDENTIFIER  */
+    NUMBER = 270,                  /* NUMBER  */
+    STRING = 271,                  /* STRING  */
+    EQ = 272,                      /* EQ  */
+    NEQ = 273,                     /* NEQ  */
+    LE = 274,                      /* LE  */
+    GE = 275                       /* GE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -84,10 +80,12 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 10 "stride.y"
-int number;char *str;
+#line 89 "stride.y"
 
-#line 91 "stride.tab.h"
+    int num;
+    char *str;
+
+#line 89 "stride.tab.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
