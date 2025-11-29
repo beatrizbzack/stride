@@ -106,3 +106,116 @@ Resultado esperado ao testar o Parser:
     action: mostre string => teste
     corra;           
     action: corra
+
+## Entrega 1/12 - VM e testes
+
+### VM Própria
+Foi desenvolvida uma máquina virtual completa, em C, que interpreta o assembly gerado pelo parser. Fazendo com que o assembly gerado pela Stride seja totalmente executável pela VM personalizada. 
+
+Recursos da VM:
+- 3 registradores: R0, R1, R2
+- Memória (@0, @1, …)
+- Pilha de avaliação
+
+Leitura de sensores:
+- TEMPO
+- DISTANCIA
+- BATIMENTOS
+
+Instruções suportadas:
+- MOV, LOAD, STORE  
+- PUSH, POP  
+- ADD, SUB, MUL, DIV  
+- CMP  
+- JZ, JNZ, JGE, JGT, JLE, JLT, JMP  
+- READ_SENSOR  
+- PRINT  
+- WAIT  
+- HALT
+
+### Testes Finais
+
+1. x := 10
+y := 5
+mostre "resultado:"
+mostre x + y * 2
+
+Saída esperada:
+
+resultado:
+20
+
+2. counter := 0
+while counter < 3 do
+  mostre "loop:"
+  mostre counter
+  counter := counter + 1
+end
+mostre "done"
+
+resultado:
+
+loop:
+0
+loop:
+1
+loop:
+2
+done
+
+3. mostre "tempo atual:"
+mostre tempo
+
+mostre "distancia atual:"
+mostre distancia
+
+if distancia > 0 then
+  mostre "distancia positiva"
+else
+  mostre "distancia zero"
+end
+
+corra
+espere 1
+pare
+
+resultado:
+
+tempo atual:
+100
+distancia atual:
+5
+distancia positiva
+distancia zero
+ACTION corra
+[VM] waiting 1 seconds (simulated)
+ACTION pare
+
+### Como compilar:
+
+1. make clean
+make
+
+- gera o Stride
+- vm (máquina virtual)
+
+2. executar:
+- ./stride programa.stride out.asm
+- ./vm out.asm
+
+### Conclusão
+A linguagem Stride implementa:
+
+estruturas de controle (if, while)
+
+expressões aritméticas completas
+
+leitura de sensores simulados
+
+ações do relógio
+
+geração de assembly
+
+execução em uma VM própria
+
+Este projeto demonstra o ciclo completo de construção de um compilador + máquina virtual — alinhado aos objetivos da APS de Lógica da Computação, cobrindo análise léxica, análise sintática, geração de código e execução.
