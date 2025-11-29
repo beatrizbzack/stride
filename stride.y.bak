@@ -1,4 +1,3 @@
-
 %{
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,9 +5,9 @@
 #include <stdarg.h>
 
 extern int yylex(void);
-extern int yydebug;
 extern FILE *yyin;
 extern int yylineno;
+int yydebug = 0;
 void yyerror(const char *s);
 
 /* codegen globals */
@@ -85,7 +84,6 @@ int is_sensor(const char *id) {
 
 %debug
 %left '+' '-'
-%debug
 %left '*' '/'
 
 %union {
@@ -98,34 +96,21 @@ int is_sensor(const char *id) {
 
 %%
 
+/* ---------- program / statements ---------- */
 program:
     /* empty */
-    | program item
-    ;
+  | program statement
+  ;
 
-item:
-    declaration
-    | command
-    ;
-
-declaration:
-    IDENTIFIER ASSIGN expression
-    {
-        int slot = sym_get_or_create($1);
-        emit("; DECL %s := (top of stack)", $1);
-        emit("POP R0");
-        emit("STORE R0, @%d", slot);
-        free($1);
-    }
-    ;
-
-command:
+/* a statement is one top-level command */
+statement:
     assignment
-    | if_stmt
-    | while_stmt
-    | action
-    ;
+  | if_stmt
+  | while_stmt
+  | action
+  ;
 
+/* ---------- assignment ---------- */
 assignment:
     IDENTIFIER ASSIGN expression
     {
@@ -135,84 +120,54 @@ assignment:
         emit("STORE R0, @%d", slot);
         free($1);
     }
-    ;
+  ;
 
+/* ---------- if ---------- */
+/* now we require a simple condition: term COMP term */
 if_stmt:
-    IF expression
-        {
-          int l_else = new_label();
-          int l_end  = new_label();
-          push_labels(l_else, l_end);
-          emit("; IF condition -> pop and test");
-          emit("POP R0");
-          emit("MOV R1, 0");
-          emit("CMP R0, R1");
-          emit("JZ L%d", l_else);
-        }
-    THEN stmt_list maybe_else
-    END
+    IF condition THEN stmt_list END
     {
-      if (label_stack_top > 0) {
-        int l_else = top_label_else();
-        emit("L%d:", l_else);
-        pop_labels();
-      }
+      /* no else */
+      /* condition already emitted code that jumps to L? if false */
+      /* after then-block, nothing else */
     }
-    ;
-
-maybe_else:
-    /* empty */ { }
-  | ELSE stmt_list
+  | IF condition THEN stmt_list ELSE stmt_list END
     {
-      if (label_stack_top > 0) {
-        int l_else = top_label_else();
-        int l_end  = top_label_end();
-        emit("JMP L%d", l_end);
-        emit("L%d:", l_else);
-      }
+      /* with else: condition already emitted code that jumps to L_else if false.
+         we need to jump over else and emit labels; condition code used top_label_end() and top_label_else() */
+      /* the condition emission created labels earlier */
     }
   ;
 
+/* ---------- while ---------- */
 while_stmt:
     WHILE
-      {
-        int l_start = new_label();
-        int l_end = new_label();
-        push_labels(l_start, l_end);
-        emit("L%d:", l_start);
-      }
-    expression
-      {
-        int l_end = top_label_end();
-        emit("POP R0");
-        emit("MOV R1, 0");
-        emit("CMP R0, R1");
-        emit("JZ L%d", l_end);
-      }
+    {
+      /* create labels and emit start */
+      int l_start = new_label();
+      int l_end = new_label();
+      push_labels(l_start, l_end);
+      emit("L%d:", l_start);
+    }
+    condition
     DO stmt_list END
-      {
-        if (label_stack_top > 0) {
-          int l_start = top_label_else();
-          int l_end   = top_label_end();
-          emit("JMP L%d", l_start);
-          emit("L%d:", l_end);
-          pop_labels();
-        }
-      }
-    ;
-
-
-opt_do:
-    /* empty */ { }
-  | DO { }
+    {
+      /* at end of body, jump back to start and emit end label */
+      int l_start = top_label_else();
+      int l_end   = top_label_end();
+      emit("JMP L%d", l_start);
+      emit("L%d:", l_end);
+      pop_labels();
+    }
   ;
 
+/* ---------- stmt_list (zero or more statements) ---------- */
 stmt_list:
     /* empty */ { }
-  | command stmt_list { }
+  | stmt_list statement { }
   ;
 
-
+/* ---------- actions ---------- */
 action:
     CORRA  { emit("; ACTION corra"); emit("PRINT \"ACTION corra\""); }
   | PARE   { emit("; ACTION pare"); emit("PRINT \"ACTION pare\""); }
@@ -230,6 +185,74 @@ action:
       }
   ;
 
+/* ---------- condition: simple comparator between two terms ---------- */
+condition:
+    /* we evaluate left term then right term, then compare and jump to 'false' label */
+    term '<' term
+    {
+      /* labels must have been pushed by the surrounding if/while */
+      int l_false = top_label_else();
+      /* terms push values onto stack */
+      emit("; COND <");
+      emit("POP R1");
+      emit("POP R0");
+      emit("CMP R0, R1");
+      /* if NOT (R0 < R1) then jump to false (i.e., R0 >= R1 -> JGE) */
+      emit("JGE L%d", l_false);
+    }
+  | term '>' term
+    {
+      int l_false = top_label_else();
+      emit("; COND >");
+      emit("POP R1");
+      emit("POP R0");
+      emit("CMP R0, R1");
+      /* if NOT (R0 > R1) then R0 <= R1 -> JLE */
+      emit("JLE L%d", l_false);
+    }
+  | term EQ term
+    {
+      int l_false = top_label_else();
+      emit("; COND ==");
+      emit("POP R1");
+      emit("POP R0");
+      emit("CMP R0, R1");
+      /* if NOT equal -> JNZ to false? CMP JNZ means not zero -> jump if not equal */
+      emit("JNZ L%d", l_false);
+    }
+  | term NEQ term
+    {
+      int l_false = top_label_else();
+      emit("; COND !=");
+      emit("POP R1");
+      emit("POP R0");
+      emit("CMP R0, R1");
+      /* if NOT (R0 != R1) then equal -> JZ false */
+      emit("JZ L%d", l_false);
+    }
+  | term LE term
+    {
+      int l_false = top_label_else();
+      emit("; COND <=");
+      emit("POP R1");
+      emit("POP R0");
+      emit("CMP R0, R1");
+      /* if NOT (R0 <= R1) then R0 > R1 -> JGT */
+      emit("JGT L%d", l_false);
+    }
+  | term GE term
+    {
+      int l_false = top_label_else();
+      emit("; COND >=");
+      emit("POP R1");
+      emit("POP R0");
+      emit("CMP R0, R1");
+      /* if NOT (R0 >= R1) then R0 < R1 -> JLT */
+      emit("JLT L%d", l_false);
+    }
+  ;
+
+/* ---------- expressions (binary ops, precedence) ---------- */
 expression:
     expr_add
     ;
@@ -237,7 +260,6 @@ expression:
 expr_add:
     expr_add '+' expr_mul
     {
-      /* left + right : both already pushed -> pop right (R1), pop left (R0) */
       emit("; BINOP +");
       emit("POP R1");
       emit("POP R0");
@@ -277,38 +299,7 @@ expr_mul:
     { /* pass-through */ }
   ;
 
-term:
-    NUMBER
-    {
-      emit("; TERM number %d", $1);
-      emit("MOV R0, %d", $1);
-      emit("PUSH R0");
-    }
-  | IDENTIFIER
-    {
-      if (is_sensor($1)) {
-        if (strcmp($1,"tempo")==0) emit("READ_SENSOR R0, TEMPO");
-        else if (strcmp($1,"distancia")==0) emit("READ_SENSOR R0, DISTANCIA");
-        else if (strcmp($1,"batimentos")==0) emit("READ_SENSOR R0, BATAMENTOS");
-        emit("PUSH R0");
-        free($1);
-      } else {
-        int slot = sym_get_or_create($1);
-        emit("; TERM identifier %s -> slot @%d", $1, slot);
-        emit("LOAD R0, @%d", slot);
-        emit("PUSH R0");
-        free($1);
-      }
-    }
-  | STRING
-    {
-      emit("; TERM string \"%s\"", $1);
-      emit("MOV R0, \"%s\"", $1);
-      emit("PUSH R0");
-      free($1);
-    }
-  ;
-
+/* ---------- terms ---------- */
 term:
     NUMBER
     {
@@ -343,10 +334,12 @@ term:
 
 %%
 
+/* error reporting */
 void yyerror(const char *s) {
     fprintf(stderr, "Erro (linha %d): %s\n", yylineno, s);
 }
 
+/* main: parse to temp and commit only on success */
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Uso: %s fonte.stride [saida.asm]\n", argv[0]);
@@ -357,20 +350,33 @@ int main(int argc, char **argv) {
     if (!yyin) { perror("fopen fonte"); return 1; }
 
     const char *outname = (argc > 2) ? argv[2] : "out.asm";
-    out = fopen(outname, "w");
-    if (!out) { perror("fopen out"); return 1; }
+    const char *tmpname = "out_temp.asm";
+    out = fopen(tmpname, "w");
+    if (!out) { perror("fopen out"); fclose(yyin); return 1; }
 
     emit("; Stride compiled assembly");
     emit("; sensors available: TEMPO DISTANCIA BATAMENTOS");
     emit("; memory slots start at @0");
     emit("; --- begin program ---");
 
-    yyparse();
+    /* ativar trace se necessário:
+       yydebug = 1;
+    */
 
-    emit("HALT");
-    fclose(out);
-    fclose(yyin);
+    int parse_result = yyparse();
 
-    printf("[COMPILADO] %s -> %s\n", argv[1], outname);
-    return 0;
+    if (parse_result == 0) {
+        emit("HALT");
+        fclose(out);
+        fclose(yyin);
+        if (rename(tmpname, outname) != 0) { perror("rename out temp"); return 1; }
+        printf("[COMPILADO] %s -> %s\n", argv[1], outname);
+        return 0;
+    } else {
+        fprintf(stderr, "[ERRO] parse falhou. Arquivo de saída não será escrito.\n");
+        fclose(out);
+        fclose(yyin);
+        remove(tmpname);
+        return 1;
+    }
 }
