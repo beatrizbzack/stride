@@ -33,7 +33,7 @@ PUSH R0
 POP R1
 POP R0
 CMP R0, R1
-JLE L0
+JLE L2
 ; TERM string "distancia positiva"
 MOV R0, "distancia positiva"
 PUSH R0
@@ -46,6 +46,9 @@ PUSH R0
 ; ACTION mostre (pop and print)
 POP R0
 PRINT R0
+JMP L2
+L1:
+L1:
 ; ACTION corra
 PRINT "ACTION corra"
 ; TERM number 1

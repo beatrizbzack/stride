@@ -125,41 +125,63 @@ assignment:
 /* ---------- if ---------- */
 /* now we require a simple condition: term COMP term */
 if_stmt:
-    IF condition THEN stmt_list END
+    IF
+      {
+        int l_else = new_label();
+        int l_end  = new_label();
+        /* store labels: first = else (false), second = end */
+        push_labels(l_else, l_end);
+      }
+    condition THEN stmt_list maybe_else END
     {
-      /* no else */
-      /* condition already emitted code that jumps to L? if false */
-      /* after then-block, nothing else */
-    }
-  | IF condition THEN stmt_list ELSE stmt_list END
-    {
-      /* with else: condition already emitted code that jumps to L_else if false.
-         we need to jump over else and emit labels; condition code used top_label_end() and top_label_else() */
-      /* the condition emission created labels earlier */
+      /* on normal end (no else) emit else-label and pop */
+      if (label_stack_top > 0) {
+        int l_else = top_label_else();
+        emit("L%d:", l_else);
+        pop_labels();
+      }
     }
   ;
+
+maybe_else:
+    /* empty */ { }
+  | ELSE stmt_list
+    {
+      if (label_stack_top > 0) {
+        int l_else = top_label_else();
+        int l_end  = top_label_end();
+        /* after then-block jump to end, then emit else label */
+        emit("JMP L%d", l_end);
+        emit("L%d:", l_else);
+      }
+    }
+  ;
+
 
 /* ---------- while ---------- */
 while_stmt:
     WHILE
-    {
-      /* create labels and emit start */
-      int l_start = new_label();
-      int l_end = new_label();
-      push_labels(l_start, l_end);
-      emit("L%d:", l_start);
-    }
+      {
+        int l_start = new_label();
+        int l_end = new_label();
+        /* push start (else-slot) and end so top_label_else() == l_start and top_label_end() == l_end */
+        push_labels(l_start, l_end);
+        emit("L%d:", l_start);
+      }
     condition
     DO stmt_list END
-    {
-      /* at end of body, jump back to start and emit end label */
-      int l_start = top_label_else();
-      int l_end   = top_label_end();
-      emit("JMP L%d", l_start);
-      emit("L%d:", l_end);
-      pop_labels();
-    }
-  ;
+      {
+        if (label_stack_top > 0) {
+          int l_start = top_label_else();
+          int l_end   = top_label_end();
+          emit("JMP L%d", l_start);
+          emit("L%d:", l_end);
+          pop_labels();
+        }
+      }
+    ;
+
+
 
 /* ---------- stmt_list (zero or more statements) ---------- */
 stmt_list:
@@ -187,70 +209,65 @@ action:
 
 /* ---------- condition: simple comparator between two terms ---------- */
 condition:
-    /* we evaluate left term then right term, then compare and jump to 'false' label */
     term '<' term
     {
-      /* labels must have been pushed by the surrounding if/while */
-      int l_false = top_label_else();
-      /* terms push values onto stack */
+      int l_false = top_label_end();   /* quando falso -> saltar para o fim do bloco */
       emit("; COND <");
       emit("POP R1");
       emit("POP R0");
       emit("CMP R0, R1");
-      /* if NOT (R0 < R1) then jump to false (i.e., R0 >= R1 -> JGE) */
+      /* if NOT (R0 < R1) then jump to false (i.e., R0 >= R1) */
       emit("JGE L%d", l_false);
     }
   | term '>' term
     {
-      int l_false = top_label_else();
+      int l_false = top_label_end();
       emit("; COND >");
       emit("POP R1");
       emit("POP R0");
       emit("CMP R0, R1");
-      /* if NOT (R0 > R1) then R0 <= R1 -> JLE */
       emit("JLE L%d", l_false);
     }
   | term EQ term
     {
-      int l_false = top_label_else();
+      int l_false = top_label_end();
       emit("; COND ==");
       emit("POP R1");
       emit("POP R0");
       emit("CMP R0, R1");
-      /* if NOT equal -> JNZ to false? CMP JNZ means not zero -> jump if not equal */
+      /* if NOT equal -> jump to false */
       emit("JNZ L%d", l_false);
     }
   | term NEQ term
     {
-      int l_false = top_label_else();
+      int l_false = top_label_end();
       emit("; COND !=");
       emit("POP R1");
       emit("POP R0");
       emit("CMP R0, R1");
-      /* if NOT (R0 != R1) then equal -> JZ false */
+      /* if NOT (R0 != R1) then equal -> jump to false */
       emit("JZ L%d", l_false);
     }
   | term LE term
     {
-      int l_false = top_label_else();
+      int l_false = top_label_end();
       emit("; COND <=");
       emit("POP R1");
       emit("POP R0");
       emit("CMP R0, R1");
-      /* if NOT (R0 <= R1) then R0 > R1 -> JGT */
       emit("JGT L%d", l_false);
     }
   | term GE term
     {
-      int l_false = top_label_else();
+      int l_false = top_label_end();
       emit("; COND >=");
       emit("POP R1");
       emit("POP R0");
       emit("CMP R0, R1");
-      /* if NOT (R0 >= R1) then R0 < R1 -> JLT */
       emit("JLT L%d", l_false);
     }
   ;
+
 
 /* ---------- expressions (binary ops, precedence) ---------- */
 expression:

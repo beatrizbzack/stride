@@ -19,7 +19,7 @@ PUSH R0
 POP R1
 POP R0
 CMP R0, R1
-JGE L1
+JGE L2
 ; TERM string "loop:"
 MOV R0, "loop:"
 PUSH R0
